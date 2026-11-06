@@ -3,6 +3,10 @@
 
 # CI Authority Gate
 
+[![PyPI](https://img.shields.io/pypi/v/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![Python](https://img.shields.io/pypi/pyversions/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate) · **Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
 
 **An integrity gate for autonomous AI agents: so that a bot does not dirty the tree
