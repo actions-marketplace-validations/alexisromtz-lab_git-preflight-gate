@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-preflight-gate"
-version = "0.1.6"
+version = "0.1.7"
 description = "Pre-write preflight gate (bash) and CI authority gate (Python composite action): fail-closed, standard library only except PyYAML for the CI extra."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -51,3 +51,13 @@ ci-authority-gate = "sim.gate_workflows_ci:main"
 # contenido. Se declara el paquete real y un CLI; el action composite sigue
 # invocando el instrumento por ruta absoluta y no depende de esta declaracion.
 packages = ["sim"]
+
+# HUELLA-V017-20261106: v0.1.7 es la primera version cuyo instrumento ACEPTA la
+# ruta que la propia documentacion pide. Medido el 06-Nov-2026 sobre
+# `pallets/flask`: `ci-authority-gate <repo>/.github/workflows` devolvia RC 31
+# UNIVERSO_VACIO (`RAIZ: .../workflows/.github/workflows`, 0 archivos) y culpaba
+# al arbol auditado de un error de argv. Ahora normaliza el sufijo exacto, mide
+# ahi e imprime el aviso declarado D5_RAIZ_YA_ES_WORKFLOWS; el RC 31 sigue vivo
+# para el universo realmente vacio. Falsadores: tests/banco_raiz_workflows.sh
+# (7/7, dos controles negativos) + el job `resolucion-del-universo` del
+# action-selftest.

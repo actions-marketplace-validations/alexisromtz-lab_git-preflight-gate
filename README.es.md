@@ -226,6 +226,24 @@ La acción no adivina el dominio: el instrumento resuelve un único punto,
 existe y a `--root` cuando no. Un `--root` que aceptara cualquier directorio con YAMLs
 sería editar el metro para que quepa la demo.
 
+<!-- HUELLA-README-ES-D5-20261106 -->
+La única excepción es una **normalización del mismo punto único, no un segundo punto**.
+Las dos formas de abajo miden `<repo>/.github/workflows`; la segunda devolvía
+`RC 31 UNIVERSO_VACIO` y culpaba al árbol auditado de un error de argv (medido el
+2026-11-06 sobre `pallets/flask`):
+
+```bash
+ci-authority-gate /ruta/al/repo                          # resuelve <repo>/.github/workflows
+ci-authority-gate /ruta/al/repo/.github/workflows        # ya resuelto: mide ahí mismo e
+                                                         # imprime AVISO D5_RAIZ_YA_ES_WORKFLOWS
+```
+
+`D5_RAIZ_YA_ES_WORKFLOWS` es un aviso declarado, no un código de retorno: nunca cambia el
+veredicto y no amplía el dominio. Cualquier otro directorio llamado `workflows` —o un
+parecido como `.github/workflowz`— sigue resolviendo a `<arg>/.github/workflows`; eso es lo
+que sostienen los casos `R4_CONTROL_BASENAME` y `R5_CONTROL_PARECIDO` de
+[`tests/banco_raiz_workflows.sh`](tests/banco_raiz_workflows.sh).
+
 Dependencia única: `PyYAML==6.0.3`, declarada como extra opcional
 (`pip install ".[ci-authority-gate]"`). El resto es stdlib. El instrumento no lee red,
 no escribe archivos, no usa aleatoriedad y no consulta el reloj.
@@ -340,8 +358,11 @@ El `action.yml` no se prueba leyendo su YAML: se ejecuta. En cada push a `main`,
 workflow [`action-selftest.yml`](.github/workflows/action-selftest.yml) corre la acción
 dos veces con `uses: ./` —sobre este mismo repositorio, donde exige `rc=0` / `PASA`, y
 sobre una fixture envenenada en `tests/fixtures/sumidero`, donde exige `rc=2` /
-`SUMIDERO_IMPUDO`—. Si la instalación del extra (`pip install "<action_dir>[ci-authority-gate]"`)
-o el enrutado de inputs se rompen, enrojece aquí antes de enrojecer en tu runner.
+`SUMIDERO_IMPUDO`—. Un tercer job, `resolucion-del-universo`, corre los dos bancos que
+cubren cómo se resuelve el argumento de raíz: `tests/banco_raiz_workflows.sh` (7 casos, 2
+controles negativos) y `--self-test`. Si la instalación del extra
+(`pip install "<action_dir>[ci-authority-gate]"`), el enrutado de inputs o la resolución de
+la raíz se rompen, enrojece aquí antes de enrojecer en tu runner.
 
 Un self-test que sólo sabe estar verde no discrimina nada: por eso el segundo caso exige
 que la acción **falle** con la causa correcta.

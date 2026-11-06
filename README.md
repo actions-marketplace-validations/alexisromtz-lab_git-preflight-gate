@@ -198,6 +198,24 @@ does not change.
 
 The action does not guess the domain: the instrument resolves a single point, `<root>/.github/workflows`. That is why `workflows-dir` routes to `--file` when the path exists and to `--root` when it does not. A `--root` that accepted any directory with YAML files would be editing the ruler so the demo fits.
 
+<!-- HUELLA-README-D5-20261106 -->
+The one exception is a **normalisation of the same single point, not a second one**. Both
+forms below measure `<repo>/.github/workflows`; the second one used to fail with
+`RC 31 UNIVERSO_VACIO` and blame the audited tree for an argv mistake (measured
+2026-11-06 on `pallets/flask`):
+
+```bash
+ci-authority-gate /path/to/repo                          # resolves <repo>/.github/workflows
+ci-authority-gate /path/to/repo/.github/workflows        # already resolved: measured in place,
+                                                         # prints AVISO D5_RAIZ_YA_ES_WORKFLOWS
+```
+
+`D5_RAIZ_YA_ES_WORKFLOWS` is a declared warning, not a return code: it never changes the
+verdict and it does not widen the domain. Any other directory called `workflows` — or a
+near miss like `.github/workflowz` — still resolves to `<arg>/.github/workflows`; that is
+what cases `R4_CONTROL_BASENAME` and `R5_CONTROL_PARECIDO` in
+[`tests/banco_raiz_workflows.sh`](tests/banco_raiz_workflows.sh) hold in place.
+
 Single dependency: `PyYAML==6.0.3`, declared as an optional extra (`pip install ".[ci-authority-gate]"`). The rest is stdlib. The instrument does not read the network, does not write files, does not use randomness and does not consult the clock.
 
 Installable without cloning the repository, from the release wheel. The
@@ -287,7 +305,7 @@ The second block is printed on every run, under `RESIDUO DECLARADO`. A gate that
 ### How the wrapper tests itself
 
 <!-- HUELLA-BADGE-SELFTEST-DOC-20261031 -->
-`action.yml` is not tested by reading its YAML: it is executed. On every push to `main`, the workflow [`action-selftest.yml`](.github/workflows/action-selftest.yml) runs the action twice with `uses: ./` — once on this repository itself, where it demands `rc=0` / `PASA`, and once on a poisoned fixture in `tests/fixtures/sumidero`, where it demands `rc=2` / `SUMIDERO_IMPUDO`. If the extra's installation (`pip install "<action_dir>[ci-authority-gate]"`) or the input routing breaks, it goes red here before going red on your runner.
+`action.yml` is not tested by reading its YAML: it is executed. On every push to `main`, the workflow [`action-selftest.yml`](.github/workflows/action-selftest.yml) runs the action twice with `uses: ./` — once on this repository itself, where it demands `rc=0` / `PASA`, and once on a poisoned fixture in `tests/fixtures/sumidero`, where it demands `rc=2` / `SUMIDERO_IMPUDO`. A third job, `resolucion-del-universo`, runs the two banks that cover how the root argument is resolved: `tests/banco_raiz_workflows.sh` (7 cases, 2 negative controls) and `--self-test`. If the extra's installation (`pip install "<action_dir>[ci-authority-gate]"`), the input routing or the root resolution breaks, it goes red here before going red on your runner.
 
 A self-test that only knows how to be green discriminates nothing: that is why the second case demands the action **fail** with the correct cause.
 
