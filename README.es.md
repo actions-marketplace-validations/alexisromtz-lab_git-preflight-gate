@@ -96,7 +96,7 @@ Identidad medida del instrumento copiado a este árbol:
 Uso como consumidor:
 
 ```yaml
-- uses: alexisromtz-lab/git-preflight-gate@v0.1.3
+- uses: alexisromtz-lab/git-preflight-gate@v0.1.4
   with:
     workflows-dir: .github/workflows
     fail-on-red: "true"
@@ -123,6 +123,24 @@ sería editar el metro para que quepa la demo.
 Dependencia única: `PyYAML==6.0.3`, declarada como extra opcional
 (`pip install ".[ci-authority-gate]"`). El resto es stdlib. El instrumento no lee red,
 no escribe archivos, no usa aleatoriedad y no consulta el reloj.
+
+Instalable sin clonar el repositorio, desde el wheel de la release. El extra
+`ci-authority-gate` es obligatorio para el CLI: sin PyYAML el instrumento no mide y
+sale con `RC=30` (fail-closed), no con verde.
+
+```bash
+pip install "git-preflight-gate[ci-authority-gate] @ https://github.com/alexisromtz-lab/git-preflight-gate/releases/download/v0.1.4/git_preflight_gate-0.1.4-py3-none-any.whl"
+ci-authority-gate --self-test   # banco must-fail incorporado; no toca disco
+ci-authority-gate --root .      # mide <raiz>/.github/workflows y devuelve su RC
+```
+
+<!-- HUELLA-README-V014-20261106 -->
+`v0.1.4` no cambia el gate: `action.yml` (`9ef420ec`) y `sim/gate_workflows_ci.py`
+(`ff9c69a9`) son los mismos blobs que en `v0.1.3`. Lo que cambia es el paquete:
+`MANIFEST.in` hace que el sdist lleve el producto, y el manifiesto declara el paquete
+`sim` y el script `ci-authority-gate`. Antes de este cambio el wheel eran 6 768 B de
+solo `dist-info` y no existía ningún CLI. En PyPI todavía no está publicado: la única
+vía de `pip` hoy es la URL de la release.
 
 Control positivo medido: workflow con `permissions: contents: read` y `uses` fijado por
 SHA completo ⇒ `CAUSAS PRESENTES: ninguna`, `VEREDICTO: PASA`, `RC=0`. Control negativo:

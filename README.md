@@ -75,7 +75,7 @@ Measured identity of the instrument copied into this tree:
 Using it as a consumer:
 
 ```yaml
-- uses: alexisromtz-lab/git-preflight-gate@v0.1.3
+- uses: alexisromtz-lab/git-preflight-gate@v0.1.4
   with:
     workflows-dir: .github/workflows
     fail-on-red: "true"
@@ -93,6 +93,24 @@ does not change.
 The action does not guess the domain: the instrument resolves a single point, `<root>/.github/workflows`. That is why `workflows-dir` routes to `--file` when the path exists and to `--root` when it does not. A `--root` that accepted any directory with YAML files would be editing the ruler so the demo fits.
 
 Single dependency: `PyYAML==6.0.3`, declared as an optional extra (`pip install ".[ci-authority-gate]"`). The rest is stdlib. The instrument does not read the network, does not write files, does not use randomness and does not consult the clock.
+
+Installable without cloning the repository, from the release wheel. The
+`ci-authority-gate` extra is mandatory for the CLI: without PyYAML the instrument does
+not measure and exits `RC=30` (fail-closed), not green.
+
+```bash
+pip install "git-preflight-gate[ci-authority-gate] @ https://github.com/alexisromtz-lab/git-preflight-gate/releases/download/v0.1.4/git_preflight_gate-0.1.4-py3-none-any.whl"
+ci-authority-gate --self-test   # built-in must-fail bank; touches no disk
+ci-authority-gate --root .      # measures <root>/.github/workflows and returns its RC
+```
+
+<!-- HUELLA-README-V014-20261106 -->
+`v0.1.4` does not change the gate: `action.yml` (`9ef420ec`) and
+`sim/gate_workflows_ci.py` (`ff9c69a9`) are the same blobs as in `v0.1.3`. What changes
+is the package: `MANIFEST.in` makes the sdist carry the product, and the manifest
+declares the `sim` package and the `ci-authority-gate` script. Before this change the
+wheel was 6 768 B of `dist-info` only and no CLI existed. It is not on PyPI yet: the
+only `pip` path today is the release URL.
 
 Measured positive control: workflow with `permissions: contents: read` and `uses` pinned by full SHA ⇒ `CAUSAS PRESENTES: ninguna`, `VEREDICTO: PASA`, `RC=0`. Negative control: `pull_request_target` + `permissions: write-all` + `curl | bash` + `actions/checkout@v4` ⇒ `CAUSAS PRESENTES: [1, 2, 5]`, `RC=1`. Empty universe ⇒ `CAUSAS PRESENTES: [31]`, `RC=31`.
 
