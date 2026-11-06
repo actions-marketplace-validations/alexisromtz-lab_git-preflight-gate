@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-preflight-gate"
-version = "0.1.4"
+version = "0.1.5"
 description = "Pre-write preflight gate (bash) and CI authority gate (Python composite action): fail-closed, standard library only except PyYAML for the CI extra."
 readme = "README.md"
 requires-python = ">=3.9"

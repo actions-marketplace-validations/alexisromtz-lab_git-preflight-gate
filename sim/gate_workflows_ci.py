@@ -23,7 +23,9 @@ REGLA DE VEREDICTO: RC 0 (PASA) | RC > 0 (FALLO CERRADO, causa tipada)
 TABLA DE CAUSAS (RC):
   1  AUTORIDAD_CONTAMINADA  Job con permisos de ESCRITURA que ejecuta codigo
                             de terceros mediante `run:` (gestor de paquetes,
-                            interprete, descarga o mutacion de VCS).
+                            interprete, descarga o mutacion de VCS).  Un
+                            cliente nativo de publicacion (ALLOWLIST_SINK)
+                            no cuenta como ejecucion: publica artefactos.
   2  SUMIDERO_IMPUDO         Job sumidero (`id-token: write`) que hace
                             `actions/checkout`, invoca herramientas dinamicas
                             (npx/pipx) o no consume exclusivamente artefactos
@@ -106,7 +108,27 @@ PAT_EXEC = re.compile(
 PAT_FETCH = re.compile(r"\b(curl|wget)\b")
 PAT_GITMUT = re.compile(r"\bgit\s+(push|commit|tag|remote|config)\b")
 PAT_GH = re.compile(r"(^|[\s;&|(])gh\s+[a-z]")
-PAT_SINK_OK = re.compile(r"^\s*npm\s+publish\b")
+# HUELLA-SINK-NATIVO-20261106: el allowlist cubria solo `npm publish`, asi que
+# todo otro cliente nativo de publicacion (`gh release create`, `twine upload`,
+# `docker push`, `cargo|poetry|uv publish`) contaba como "ejecuta codigo de
+# terceros" y disparaba RC 1 en el patron de release canonico y endurecido.
+# Medido en `pallets/flask`: `.github/workflows/publish.yaml :: create-release`
+# (`permissions: contents: write`, sin checkout, `gh release create --draft`)
+# -> RC 1 falso. La allowlist NO abre la puerta a `gh api` ni a `gh` en general:
+# solo a los verbos de publicacion, que no ejecutan codigo del repositorio.
+PAT_SINK_OK = re.compile(
+    r"^\s*(?:"
+    r"npm\s+publish\b"
+    r"|pnpm\s+publish\b"
+    r"|yarn\s+npm\s+publish\b"
+    r"|twine\s+upload\b"
+    r"|gh\s+release\s+(?:create|upload|edit)\b"
+    r"|docker\s+push\b"
+    r"|cargo\s+publish\b"
+    r"|poetry\s+publish\b"
+    r"|uv\s+publish\b"
+    r")"
+)
 PAT_DINAMICO = re.compile(r"\b(npx|pipx)\b")
 PAT_SECRETS = re.compile(r"\$\{\{\s*secrets\.[A-Za-z0-9_]")
 PAT_SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -393,6 +415,45 @@ jobs:
       - run: npm ci
 """ % (SHA_CHECKOUT,)
 
+# HUELLA-SINK-NATIVO-20261106: control positivo -- el release canonico de
+# `pallets/flask` (autoridad de escritura, sin checkout, `gh release create`)
+# tiene que PASAR.  Antes de la allowlist daba RC 1.
+C7_PUBLICADOR_NATIVO = """
+name: publish
+on:
+  push:
+    tags: ['*']
+permissions: {}
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@%s
+        with:
+          name: dist
+          path: dist/
+      - name: create release
+        run: gh release create --draft --repo ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+""" % (SHA_DOWNLOAD,)
+
+# ... y su must-fail: `gh` NO es un sink en bloque.  Bajo la misma autoridad,
+# `gh api` mutando la configuracion del repositorio sigue siendo RC 1.
+C8_GH_API_EN_AUTORIDAD = """
+name: contaminado-gh
+on: push
+jobs:
+  alterar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh api -X DELETE repos/${GITHUB_REPOSITORY}/branches/main/protection
+"""
+
 C2_SUMIDERO = """
 name: sumidero
 on:
@@ -472,6 +533,8 @@ BANCO = (
     ("C4_SECRETO_EXPUESTO", C4_SECRETO, 4, frozenset([4])),
     ("C5_REF_MUTABLE", C5_REF, 5, frozenset([5])),
     ("C6_DOS_CAUSAS_A_LA_VEZ", C6_DOS_CAUSAS, 1, frozenset([1, 2])),
+    ("C7_PUBLICADOR_NATIVO", C7_PUBLICADOR_NATIVO, 0, frozenset()),
+    ("C8_GH_API_EN_AUTORIDAD", C8_GH_API_EN_AUTORIDAD, 1, frozenset([1])),
 )
 CONTROL = "C0_CANONICO_DOS_JOBS"
 
