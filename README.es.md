@@ -1,12 +1,33 @@
 <!-- HUELLA-README-ES-20261105 -->
 **Idioma:** Español · [English](README.md)
 
-# CI Authority Gate
+# preflight-gate
 
-**Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate) · **Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
+**Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate)
 
 **Un gate de integridad para agentes de IA autónomos: que un bot no ensucie el árbol
 ni cometa colisiones de concurrencia.**
+
+## Qué se entrega como producto, y qué está en el banco de pruebas
+
+| nivel | artefacto | estado | medido el 06-Nov-2026 |
+|---|---|---|---|
+| **producto** | `preflight-gate.sh` — 145 líneas de bash, cero dependencias | estable | banco de casos **9/9**, cada código con su causa |
+| banco | `sim/gate_workflows_ci.py` + el `action.yml` de la raíz | **experimental** | dispara en **9/9** repos públicos mantenidos ⇒ todavía no discrimina |
+
+Todo lo que hay desde [`Parte 2`](#parte-2--análisis-topológico-avanzado-experimental)
+hacia abajo es ese segundo instrumento. Se publica porque sus falsadores están publicados,
+no porque esté listo para bloquear un merge: su tasa base medida está en esa sección, y
+leerla es el punto.
+
+Descargar el producto:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexisromtz-lab/git-preflight-gate/main/preflight-gate.sh \
+  -o preflight-gate.sh
+```
+
+Sin paso de instalación, sin `pip`, sin action, sin token.
 
 Antes de que un agente escriba una línea, el gate exige una tupla de destino —
 `TARGET` (absoluto) · `BLOB_PRE` · `HUELLA` · `LINEAS_PRE` — y devuelve un código que
@@ -76,8 +97,71 @@ telemetría — el instrumento que se cuenta a sí mismo.
   líneas: en la rama de creación, la tupla es **contrato**, no medición. Se declara; no
   se repara (fail-closed es correcto).
 - No juzga el contenido: certifica identidad y colisión, no corrección.
+- **Este build es un subconjunto del gate del que salió.** Las 145 líneas publicadas aquí
+  implementan nueve códigos. La implementación de referencia de la que vienen implementa
+  cuatro más, y son justo los que defienden contra un *falso verde*: `RC 19` (la huella
+  está pero el blob **no** es el contratado ⇒ ratificación *sin* identidad), `RC 23` (el
+  destino está ignorado por git ⇒ `git status` devuelve vacío, un gate ingenuo lee «limpio»
+  y **autoriza** una escritura sin historia), `RC 24` (el índice lleva un bit de frescura
+  ⇒ git se niega a comparar y la misma salida vacía se lee como limpio) y `RC 31` (el
+  objeto está vacío con `LINEAS_PRE > 0`). Mientras este archivo no se ponga al día, un
+  `RC 11` aquí significa *la marca está*, no *el objeto es el que contrataste*.
+  Medido sobre la edición de esta misma página: post-vuelo con blob contratado `ec33b0c0`
+  sobre un disco que tenía `c63c73ce` devolvió `RC 11`; el gate de referencia devuelve
+  `RC 19` ahí. Mismo archivo, misma tupla, dos veredictos: ese es el hueco, y es lo
+  siguiente que se cierra.
+
+---
+
+# Parte 2 — Análisis topológico avanzado (experimental)
+
+**Nada de esta parte es el producto.** Es un segundo instrumento, con su propio dominio,
+su propia dependencia (`PyYAML`) y su propio defecto sin resolver. Se documenta porque un
+instrumento de banco que esconde su tasa base es indistinguible de una estafa.
+
+## Estado medido: todavía no discrimina
+
+El veredicto es `RC = min(causas)`, así que **gana la causa de número más bajo presente**.
+Las causas `1`, `2`, `4` y `5` describen la postura ordinaria de un pipeline de release
+real — un job con `contents: write` que corre `npm ci`, un sumidero que publica sin
+`download-artifact`, `${{ secrets.* }}` en un bloque `env:`, `uses: …@v4` en vez de un
+SHA de 40 caracteres. Ninguna de esas es un defecto: son la forma de publicar.
+
+Barrido medido el 06-Nov-2026 sobre `.github/workflows/` de nueve repositorios públicos
+mantenidos — `git clone --depth 1`, una llamada `--root` por repo:
+
+| repo | archivos de workflow | veredicto | causas presentes |
+|---|---:|---|---|
+| `psf/requests` | 8 | RC 1 · FALLO CERRADO | 1 |
+| `astral-sh/ruff` | 25 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| `pydantic/pydantic` | 9 | RC 1 · FALLO CERRADO | 1, 2, 4 |
+| `tiangolo/fastapi` | 18 | RC 1 · FALLO CERRADO | 1, 2, 4 |
+| `pallets/flask` | 5 | RC 1 · FALLO CERRADO | 1 |
+| `numpy/numpy` | 23 | RC 2 · FALLO CERRADO | 2, 4 |
+| `vitejs/vite` | 13 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| `sharkdp/bat` | 2 | RC 4 · FALLO CERRADO | 4, 5 |
+| `jqlang/jq` | 8 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| **total** | **111** | **9/9 FALLO CERRADO** | — |
+
+La tasa base del veredicto bloqueante sobre repositorios mantenidos es por tanto **100 %**,
+y un gate que está rojo en todo no está midiendo: está rechazando. Sólo la causa `3`,
+`DISPARADOR_ENVENENADO` — `pull_request_target` / `workflow_run` más `actions/checkout`
+de `github.event.pull_request.head` dentro de un contexto con scopes de escritura o
+secretos, la forma "pwn request" — disparó **0 de 9**. Es la única causa que describe
+explotación por un atacante y no postura de un mantenedor.
+
+**Lo que haría publicable este instrumento** no es otra causa. Es particionar el veredicto:
+la causa `3` bloquea, las causas `1/2/4/5` pasan a ser postura declarada que se imprime en
+cada corrida, y `RC 31` sigue siendo lo que es — una falla de *lectura*, nunca un veredicto.
+Esa partición sólo es publicable junto con su control positivo: el caso
+`C3_DISPARADOR_ENVENENADO` de `--self-test` tiene que seguir disparando `RC 3`, o el
+arreglo cambiaría un instrumento rojo-en-todo por uno verde-en-todo, que es el más
+peligroso de los dos. Hasta que existan los dos, esto está en el banco.
 
 ## La Action de la raíz: CI Authority Gate
+
+**Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
+— la ficha conserva el nombre con el que se registró.
 
 El `action.yml` de este repositorio es una **action composite** que ejecuta un segundo
 instrumento, `sim/gate_workflows_ci.py`: un verificador estructural de la topología de
@@ -159,7 +243,12 @@ El primero protege una escritura; el segundo audita un árbol de workflows. Comp
 doctrina (fail-closed, causa impresa, cero archivos = imposibilidad declarada), no el
 código.
 
-## Instalarlo en tu repositorio en 1 minuto
+## Instalar la Action en tu repositorio en 1 minuto
+
+> **Esto instala el instrumento experimental, no el producto.** La plantilla de abajo
+> ejecuta `action.yml`, que ejecuta `sim/gate_workflows_ci.py`. Lee antes
+> [Estado medido](#estado-medido-todavía-no-discrimina): en un repositorio mantenido este
+> workflow se pone rojo hoy por motivos que no son defectos.
 
 <!-- HUELLA-BADGE-PLATINO-README-20261031 -->
 
