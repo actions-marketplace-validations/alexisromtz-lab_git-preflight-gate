@@ -4,15 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-preflight-gate"
-version = "0.1.5"
+version = "0.1.6"
 description = "Pre-write preflight gate (bash) and CI authority gate (Python composite action): fail-closed, standard library only except PyYAML for the CI extra."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "alexisromtz-lab" }]
-dependencies = []
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
+# HUELLA-PUERTA-FALSA-DEPENDENCIAS-20261106: `dependencies = []` era la misma
+# clase de defecto que `packages = []`, un grado mas arriba. El wheel v0.1.5 ya
+# traia el codigo, pero `pip install git-preflight-gate` a secas dejaba un CLI
+# que moria con RC 30 (NO_MEDIDO) al primer YAML: PyYAML solo viajaba en el
+# extra. Es decir, la instruccion de cabecera del README abria una puerta que
+# no llevaba a ningun lado — puerta falsa medida, no supuesta. El extra se
+# conserva porque nombra la misma dependencia y no rompe instalaciones
+# existentes; el default ya la resuelve.
 ci-authority-gate = ["PyYAML==6.0.3"]
 
 [project.urls]

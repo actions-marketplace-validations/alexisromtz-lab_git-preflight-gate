@@ -12,6 +12,24 @@ Antes de que un agente escriba una línea, el gate exige una tupla de destino �
 `TARGET` (absoluto) · `BLOB_PRE` · `HUELLA` · `LINEAS_PRE` — y devuelve un código que
 **autoriza o bloquea** la escritura. Sin corrida previa con `RC 0`, no se escribe.
 
+## Instalación
+
+```bash
+pip install git-preflight-gate        # gate de CI en Python (PyYAML viaja con él)
+ci-authority-gate /ruta/a/tu/repo     # RC 0 = pasa · RC > 0 = fallo cerrado con causa
+```
+
+Dos puertas, medidas por separado — no se confunden:
+
+| puerta | comando | qué necesita |
+|---|---|---|
+| **gate de CI** | `pip install git-preflight-gate` | Python ≥ 3.9 + PyYAML (lo resuelve pip) |
+| **pre-write gate (bash)** | `curl -fsSL https://raw.githubusercontent.com/alexisromtz-lab/git-preflight-gate/main/preflight-gate.sh -o preflight-gate.sh` | bash + git, **cero dependencias** |
+
+El wheel trae el gate de Python (`sim/`); el gate de bash viaja en el sdist y en el repositorio, y es deliberadamente sin dependencias para correr en una máquina sin nada instalado. Ninguno envuelve al otro.
+
+### El pre-write gate, en la terminal
+
 ```bash
 bash preflight-gate.sh /ruta/absoluta/archivo.py <blob_pre> <huella_exclusiva> <lineas_pre>
 ```
