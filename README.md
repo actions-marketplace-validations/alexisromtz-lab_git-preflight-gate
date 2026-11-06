@@ -3,7 +3,11 @@
 
 # preflight-gate
 
-**Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate)
+[![PyPI](https://img.shields.io/pypi/v/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![Python](https://img.shields.io/pypi/pyversions/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+**Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate) · **Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
 
 **An integrity gate for autonomous AI agents: so that a bot does not dirty the tree
 and does not commit concurrency collisions either.**
@@ -32,6 +36,24 @@ No install step, no `pip`, no action, no token.
 Before an agent writes a line, the gate demands a destination tuple —
 `TARGET` (absolute) · `BLOB_PRE` · `HUELLA` · `LINEAS_PRE` — and returns a code that
 **authorizes or blocks** the write. Without a prior run ending in `RC 0`, nothing is written.
+
+## Install
+
+```bash
+pip install git-preflight-gate        # Python CI gate (PyYAML comes with it)
+ci-authority-gate /path/to/your/repo  # RC 0 = pass · RC > 0 = fail-closed, cause printed
+```
+
+Two doors, measured separately — do not confuse them:
+
+| door | command | what it needs |
+|---|---|---|
+| **CI authority gate** | `pip install git-preflight-gate` | Python ≥ 3.9 + PyYAML (pip resolves it) |
+| **pre-write gate (bash)** | `curl -fsSL https://raw.githubusercontent.com/alexisromtz-lab/git-preflight-gate/main/preflight-gate.sh -o preflight-gate.sh` | bash + git, **zero dependencies** |
+
+The wheel ships the Python gate (`sim/`); the bash gate ships in the source distribution and in the repository, and is deliberately dependency-free so it can run on a machine with nothing installed. Neither is a wrapper around the other.
+
+### The pre-write gate, at the shell
 
 ```bash
 bash preflight-gate.sh /absolute/path/file.py <blob_pre> <exclusive_marker> <lineas_pre>
