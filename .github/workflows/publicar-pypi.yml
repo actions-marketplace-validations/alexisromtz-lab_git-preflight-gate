@@ -1,0 +1,83 @@
+name: Publicar en PyPI
+
+# HUELLA-PUBLICAR-PYPI-OIDC-20261106
+#
+# POR QUE OIDC Y NO UN TOKEN
+#   Medido el 6-Nov-2026 al subir 0.1.7: `uv publish` devolvio
+#   `error: No OIDC token discovered` + `Missing credentials for
+#   https://upload.pypi.org/legacy/`, RC 2. No habia `.pypirc`, ni variable de
+#   entorno, ni item de llavero: el token no existe en la maquina del dueno, y
+#   no hace falta que exista. Con `id-token: write` PyPI emite un testigo
+#   efimero para ESTE workflow de ESTE repositorio: no hay secreto que rotar,
+#   ni que filtrar, ni que pueda quedarse en un historial de shell.
+#
+# REQUISITO DE UNA SOLA VEZ (lo hace el dueno en PyPI, no aqui)
+#   pypi.org -> proyecto `git-preflight-gate` -> Publishing
+#     -> Add a new pending publisher
+#        PyPI Project Name : git-preflight-gate
+#        Owner             : alexisromtz-lab
+#        Repository name   : git-preflight-gate
+#        Workflow name     : publicar-pypi.yml
+#        Environment name  : pypi
+#   Sin ese registro el trabajo falla CERRADO con el mensaje de PyPI: no
+#   publica a medias ni deja el indice en un estado que haya que deshacer.
+#
+# COMO SE PUBLICO v0.1.7
+#   Actions -> "Publicar en PyPI" -> Run workflow -> rama/ref `v0.1.7`.
+#   La version del sello y la de `pyproject.toml` se comparan ANTES de subir:
+#   un release que no coincide con el paquete es el defecto que este paso mide.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publicar:
+    name: Construir el artefacto y publicarlo en el indice
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Traer el arbol del release (o de la ref pedida)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Intérprete declarado
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: La etiqueta y pyproject declaran la misma version
+        env:
+          ETIQUETA: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+
+          texto = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          coincidencia = re.search(r'^version\s*=\s*"([^"]+)"', texto, re.M)
+          if coincidencia is None:
+              sys.exit("RC 20: pyproject.toml no declara version")
+          version = coincidencia.group(1)
+
+          etiqueta = (os.environ.get("ETIQUETA") or "").strip().lstrip("v")
+          print("pyproject: %s" % version)
+          print("etiqueta : %s" % (etiqueta or "(sin release; ref manual)"))
+          if etiqueta and etiqueta != version:
+              sys.exit("RC 1: la etiqueta %s no es la version %s del paquete"
+                       % (etiqueta, version))
+          PY
+
+      - name: Construir sdist y wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publicar en PyPI con testigo efimero (sin token)
+        uses: pypa/gh-action-pypi-publish@release/v1
