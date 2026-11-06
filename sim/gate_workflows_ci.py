@@ -45,6 +45,17 @@ TABLA DE CAUSAS (RC):
  31  UNIVERSO_VACIO          No hay archivos de workflow que medir.
  32  YAML_INVALIDO           El archivo no parsea.
 
+AVISO DECLARADO (no es RC, no cambia el veredicto):
+  D5_RAIZ_YA_ES_WORKFLOWS    El argumento ya apunta a `.github/workflows`, asi
+                            que se mide ahi y NO se anexa la ruta otra vez.
+                            Sin este aviso, el error de argv mas probable
+                            (pasar el directorio de workflows como raiz)
+                            devolvia RC 31 UNIVERSO_VACIO culpando al arbol
+                            auditado de estar vacio, cuando el defecto estaba
+                            en el argumento. No amplia el dominio: cualquier
+                            otro directorio llamado `workflows` sigue
+                            resolviendo a `<raiz>/.github/workflows`.
+
 RESIDUO DECLARADO (PLANO CIEGO FUERA DEL ARCHIVO):
   1. Permisos por defecto del GITHUB_TOKEN a nivel de repositorio/organizacion.
   2. Politicas de confianza OIDC / Trusted Publishing en el registro destino.
@@ -119,6 +130,13 @@ CAUSAS = {
     31: "UNIVERSO_VACIO",
     32: "YAML_INVALIDO",
 }
+
+# HUELLA-RC31-RAIZ-YA-ES-WORKFLOWS-20261106: el posicional y `--root` nombran la
+# RAIZ del arbol, no el directorio de workflows. Medido 06-Nov-2026 sobre
+# `pallets/flask`: `ci-authority-gate <repo>/.github/workflows` devolvia
+# RC 31 UNIVERSO_VACIO con `RAIZ: …/workflows/.github/workflows` y 0 archivos
+# medidos. El instrumento se cerraba bien y culpaba al sujeto equivocado.
+AVISO_D5 = "D5_RAIZ_YA_ES_WORKFLOWS"
 
 # ----------------------------------------------------------------------------
 # Patrones.  Todos son LEXICOS y se aplican linea por linea (dominio declarado:
@@ -660,6 +678,43 @@ BANCO = (
 )
 CONTROL = "C0_CANONICO_DOS_JOBS"
 
+# HUELLA-BANCO-RUTAS-20261106: el banco de arriba mide YAML en memoria y no
+# puede ver el defecto de argv (RC 31 por ruta duplicada), porque ese defecto
+# nace ANTES de leer un archivo. Este segundo banco mide la resolucion del
+# universo: cada caso declara la raiz, el directorio esperado y el aviso.
+# R4 y R5 son controles negativos: si la resolucion empezara a "adivinar
+# cualquier directorio con YAMLs", esos dos casos se pondrian verdes con el
+# directorio equivocado y el banco enrojeceria.
+BANCO_RUTAS = (
+    ("R0_RAIZ_REPO", "/tmp/repo", "/tmp/repo/.github/workflows", None),
+    ("R1_YA_ES_WORKFLOWS", "/tmp/repo/.github/workflows",
+     "/tmp/repo/.github/workflows", AVISO_D5),
+    ("R2_BARRA_FINAL", "/tmp/repo/.github/workflows/",
+     "/tmp/repo/.github/workflows", AVISO_D5),
+    ("R3_RELATIVA", ".github/workflows", ".github/workflows", AVISO_D5),
+    ("R4_CONTROL_BASENAME", "/tmp/repo/workflows",
+     "/tmp/repo/workflows/.github/workflows", None),
+    ("R5_CONTROL_PARECIDO", "/tmp/repo/.github/workflowz",
+     "/tmp/repo/.github/workflowz/.github/workflows", None),
+)
+
+
+def correr_banco_rutas():
+    filas = []
+    for nombre, raiz, esperado, aviso_esp in BANCO_RUTAS:
+        medido, aviso = dir_workflows_efectivo(raiz)
+        ok = (medido == esperado) and (aviso == aviso_esp)
+        filas.append({
+            "caso": nombre,
+            "raiz": raiz,
+            "directorio_esperado": esperado,
+            "directorio_medido": medido,
+            "aviso_esperado": aviso_esp,
+            "aviso_medido": aviso,
+            "ok": ok,
+        })
+    return filas, all(f["ok"] for f in filas)
+
 
 def correr_banco():
     filas = []
@@ -703,6 +758,24 @@ def _fmt_causas(s):
     )
 
 
+def dir_workflows_efectivo(raiz):
+    """Resuelve el UNICO punto <raiz>/.github/workflows sin anexarlo dos veces.
+
+    Devuelve (directorio, aviso). `aviso` es None salvo que el argumento ya
+    apunte al punto resuelto, en cuyo caso vale AVISO_D5.
+
+    No amplia el dominio: solo reconoce la forma exacta `.github/workflows`.
+    Un directorio llamado `workflows` que no cuelgue de `.github` sigue
+    resolviendo a `<raiz>/.github/workflows` (control negativo en BANCO_RUTAS).
+    Funcion pura sobre el texto: no toca disco, para que el banco la ejercite.
+    """
+    p = os.path.normpath(raiz)
+    partes = p.replace("\\", "/").rstrip("/").split("/")
+    if len(partes) >= 2 and partes[-1] == "workflows" and partes[-2] == ".github":
+        return p, AVISO_D5
+    return os.path.join(p, ".github", "workflows"), None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Gate estructural de CI: topologia de autoridad en .github/workflows/."
@@ -720,13 +793,16 @@ def main(argv=None):
     banco = ns.self_test or ns.must_fail
 
     if banco:
-        filas, banco_ok = correr_banco()
+        filas, yml_ok = correr_banco()
+        filas_rutas, rutas_ok = correr_banco_rutas()
+        banco_ok = yml_ok and rutas_ok
         if ns.json:
             print(json.dumps({
                 "universo": UNIVERSO, "motor": MOTOR, "invariante": INVARIANTE,
                 "regla_de_veredicto": REGLA, "residuo_declarado": list(RESIDUO),
-                "causas": CAUSAS, "self_test": filas, "banco_ok": banco_ok,
-                "rc": 0 if banco_ok else 21,
+                "causas": CAUSAS, "self_test": filas, "banco_ok": yml_ok,
+                "self_test_rutas": filas_rutas, "banco_rutas_ok": rutas_ok,
+                "banco_global_ok": banco_ok, "rc": 0 if banco_ok else 21,
             }, indent=2, ensure_ascii=False))
         else:
             imprimir_cabecera()
@@ -746,25 +822,38 @@ def main(argv=None):
                 for d in f["detalle"]:
                     print("  [%s] %s" % (f["caso"], d))
             print("")
+            print("BANCO RUTAS (resolucion del universo; funcion pura, sin disco)")
+            print("%-24s %-40s %-40s %-6s %s" % (
+                "CASO", "DIRECTORIO ESPERADO", "DIRECTORIO MEDIDO", "OK", "AVISO"))
+            for f in filas_rutas:
+                print("%-24s %-40s %-40s %-6s %s" % (
+                    f["caso"], f["directorio_esperado"], f["directorio_medido"],
+                    "SI" if f["ok"] else "NO", f["aviso_medido"] or "-",
+                ))
+            print("")
+            print("banco_yml_ok = %s" % yml_ok)
+            print("banco_rutas_ok = %s" % rutas_ok)
             print("banco_ok = %s" % banco_ok)
         return 0 if banco_ok else 21
 
     raiz = ns.root or ns.ruta
     archivos = []
     if ns.archivo:
+        dir_universo, aviso = None, None
         archivos = [ns.archivo]
     else:
-        d = os.path.join(raiz, ".github", "workflows")
-        if os.path.isdir(d):
-            for fn in sorted(os.listdir(d)):
+        dir_universo, aviso = dir_workflows_efectivo(raiz)
+        if os.path.isdir(dir_universo):
+            for fn in sorted(os.listdir(dir_universo)):
                 if fn.endswith(".yml") or fn.endswith(".yaml"):
-                    archivos.append(os.path.join(d, fn))
+                    archivos.append(os.path.join(dir_universo, fn))
 
     hallazgos = []
     observaciones = []
     if not archivos:
         hallazgos.append({"rc": 31, "causa": CAUSAS[31], "archivo": "-", "job": "-",
-                          "detalle": "0 archivos en %s: nada que medir" % (os.path.join(raiz, ".github", "workflows"),)})
+                          "detalle": "0 archivos en %s: nada que medir" % (
+                              dir_universo if dir_universo else raiz,)})
     else:
         for ruta in archivos:
             try:
@@ -785,7 +874,8 @@ def main(argv=None):
         print(json.dumps({
             "universo": UNIVERSO, "motor": MOTOR, "invariante": INVARIANTE,
             "regla_de_veredicto": REGLA, "residuo_declarado": list(RESIDUO),
-            "causas": CAUSAS, "raiz": raiz, "archivos": archivos,
+            "causas": CAUSAS, "raiz": raiz, "universo_resuelto": dir_universo,
+            "aviso": aviso, "archivos": archivos,
             "hallazgos": hallazgos, "causas_presentes": causas, "rc": rc,
             "observaciones": observaciones,
         }, indent=2, ensure_ascii=False))
@@ -793,6 +883,11 @@ def main(argv=None):
         imprimir_cabecera()
         print("")
         print("RAIZ: %s" % raiz)
+        if aviso:
+            print("AVISO %s: el argumento ya es el directorio de workflows; se mide ahi." % aviso)
+            print("  (sin esta normalizacion, anexar '.github/workflows' otra vez daria RC 31")
+            print("   UNIVERSO_VACIO y culparia al arbol auditado de un error de argv.)")
+        print("UNIVERSO RESUELTO: %s" % (dir_universo if dir_universo else "-"))
         print("ARCHIVOS MEDIDOS: %d" % len(archivos))
         for h in hallazgos:
             print("  RC %-2d %-22s %s :: %s :: %s"
