@@ -40,6 +40,16 @@ name: Publicar en PyPI
 #   Actions -> "Publicar en PyPI" -> Run workflow -> ref `v0.1.7`.
 #   La version del sello y la de `pyproject.toml` se comparan ANTES de construir:
 #   un release que no coincide con el paquete es el defecto que este paso mide.
+#
+# POR QUE `dist/` NO LLEVA SU PROPIO SHA256SUMS
+#   Medido el 6-Nov-2026 en la corrida 42174113562: el artefacto heredado se
+#   verifico bien (`Checking dist/git_preflight_gate-0.1.7-py3-none-any.whl:
+#   PASSED`) y el paso murio una linea despues con `Checking dist/SHA256SUMS:
+#   ERROR InvalidDistribution: Unknown distribution format: 'SHA256SUMS'`. PyPI
+#   no acepta nada que no sea `.whl` o `.tar.gz`, y `packages-dir` se lleva
+#   TODO lo que hay en la carpeta. El archivo de hashes se borra despues de que
+#   `sha256sum -c` lo consuma y antes de entregar la carpeta: la verificacion
+#   sigue siendo exigible, y el sobrante deja de viajar al indice.
 
 on:
   release:
@@ -119,6 +129,13 @@ jobs:
         run: |
           cd dist
           sha256sum -c SHA256SUMS
+
+      # HUELLA-PYPI-SIN-SHA256SUMS-20261106: va DESPUES de `sha256sum -c` a
+      # proposito. Si el paso anterior deja de correr, este `rm` no tiene con
+      # que compararse y el artefacto viaja sin verificar; el orden es la parte
+      # del arreglo que no se puede reordenar sin volver al defecto.
+      - name: Sacar el archivo de hashes antes de publicar
+        run: rm -f dist/SHA256SUMS
 
       - name: Publicar con el testigo de PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
