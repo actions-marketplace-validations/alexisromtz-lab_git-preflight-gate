@@ -5,3 +5,10 @@ tmp/
 *.egg-info/
 __pycache__/
 *.pyc
+# HUELLA-GITIGNORE-BUILD-20261106: `python -m build` y el venv de build dejan
+# dist/, build/ y el entorno en la raiz. Sin esto el arbol queda sucio tras la
+# unica operacion que el README documenta.
+dist/
+build/
+.b/
+.venv/

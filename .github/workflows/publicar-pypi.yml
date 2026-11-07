@@ -1,0 +1,143 @@
+name: Publicar en PyPI
+
+# HUELLA-PUBLICAR-PYPI-DOS-JOBS-20261106
+#
+# POR QUE OIDC Y NO UN TOKEN
+#   Medido el 6-Nov-2026 al subir 0.1.7: `uv publish` devolvio
+#   `error: No OIDC token discovered` + `Missing credentials for
+#   https://upload.pypi.org/legacy/`, RC 2. No habia `.pypirc`, ni variable de
+#   entorno, ni item de llavero: el token no existe en la maquina del dueno, y
+#   no hace falta que exista. Con `id-token: write` PyPI emite un testigo
+#   efimero para ESTE workflow de ESTE repositorio: no hay secreto que rotar,
+#   ni que filtrar, ni que pueda quedarse en un historial de shell.
+#
+# POR QUE DOS TRABAJOS (medido en este mismo repositorio)
+#   La primera version de este workflow ponia checkout + build + publicacion en
+#   un solo trabajo con `id-token: write`. El action de este repositorio la
+#   midio en rojo con tres causas: RC 1 AUTORIDAD_CONTAMINADA (un trabajo con
+#   autoridad de ESCRITURA ejecutando codigo del repositorio: `python - <<PY`),
+#   RC 2 SUMIDERO_IMPUDO (autoridad de token sin `actions/download-artifact`) y
+#   RC 5 REF_MUTABLE (`actions/checkout@v4`, `setup-python@v5`,
+#   `gh-action-pypi-publish@release/v1`). La separacion no es ceremonia: es el
+#   invariante `Autoridad(job) > 0 => Ejecucion(repo u deps)(job) = vacio`.
+#     construir -> checkout + build, permisos de LECTURA, no toca el token.
+#     publicar  -> sin checkout, sin codigo del repositorio, recibe el artefacto
+#                  y lo entrega al indice.  Si el build fuese comprometido, el
+#                  unico poder que hereda es publicar lo que ya se construyo.
+#
+# REQUISITO DE UNA SOLA VEZ (lo hace el dueno en PyPI, no aqui)
+#   pypi.org -> proyecto `git-preflight-gate` -> Publishing
+#     -> Add a new pending publisher
+#        PyPI Project Name : git-preflight-gate
+#        Owner             : alexisromtz-lab
+#        Repository name   : git-preflight-gate
+#        Workflow name     : publicar-pypi.yml
+#        Environment name  : pypi
+#   Sin ese registro el trabajo falla CERRADO con el mensaje de PyPI: no
+#   publica a medias ni deja el indice en un estado que haya que deshacer.
+#
+# COMO SE PUBLICA v0.1.7
+#   Actions -> "Publicar en PyPI" -> Run workflow -> ref `v0.1.7`.
+#   La version del sello y la de `pyproject.toml` se comparan ANTES de construir:
+#   un release que no coincide con el paquete es el defecto que este paso mide.
+#
+# POR QUE `dist/` NO LLEVA SU PROPIO SHA256SUMS
+#   Medido el 6-Nov-2026 en la corrida 42174113562: el artefacto heredado se
+#   verifico bien (`Checking dist/git_preflight_gate-0.1.7-py3-none-any.whl:
+#   PASSED`) y el paso murio una linea despues con `Checking dist/SHA256SUMS:
+#   ERROR InvalidDistribution: Unknown distribution format: 'SHA256SUMS'`. PyPI
+#   no acepta nada que no sea `.whl` o `.tar.gz`, y `packages-dir` se lleva
+#   TODO lo que hay en la carpeta. El archivo de hashes se borra despues de que
+#   `sha256sum -c` lo consuma y antes de entregar la carpeta: la verificacion
+#   sigue siendo exigible, y el sobrante deja de viajar al indice.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  construir:
+    name: Construir sdist y wheel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Traer el arbol del release (o de la ref pedida)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Interprete declarado
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: La etiqueta y pyproject declaran la misma version
+        env:
+          ETIQUETA: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+
+          texto = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          coincidencia = re.search(r'^version\s*=\s*"([^"]+)"', texto, re.M)
+          if coincidencia is None:
+              sys.exit("RC 20: pyproject.toml no declara version")
+          version = coincidencia.group(1)
+
+          etiqueta = (os.environ.get("ETIQUETA") or "").strip().lstrip("v")
+          print("pyproject: %s" % version)
+          print("etiqueta : %s" % (etiqueta or "(sin release; ref manual)"))
+          if etiqueta and etiqueta != version:
+              sys.exit("RC 1: la etiqueta %s no es la version %s del paquete"
+                       % (etiqueta, version))
+          PY
+
+      - name: Construir sdist y wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+          cd dist && sha256sum ./*.whl ./*.tar.gz > SHA256SUMS && cat SHA256SUMS
+
+      - name: Entregar el artefacto al trabajo de publicacion
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+
+  publicar:
+    name: Publicar en el indice con testigo efimero
+    needs: [construir]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/git-preflight-gate
+    permissions:
+      id-token: write
+      actions: read
+    steps:
+      - name: Recibir el artefacto construido
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Comprobar que el artefacto heredado esta integro
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+
+      # HUELLA-PYPI-SIN-SHA256SUMS-20261106: va DESPUES de `sha256sum -c` a
+      # proposito. Si el paso anterior deja de correr, este `rm` no tiene con
+      # que compararse y el artefacto viaja sin verificar; el orden es la parte
+      # del arreglo que no se puede reordenar sin volver al defecto.
+      - name: Sacar el archivo de hashes antes de publicar
+        run: rm -f dist/SHA256SUMS
+
+      - name: Publicar con el testigo de PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/

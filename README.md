@@ -1,144 +1,258 @@
-# CI Authority Gate
+<!-- HUELLA-README-EN-20261105 -->
+**Language:** English · [Español](README.es.md)
+
+# preflight-gate
+
+[![PyPI](https://img.shields.io/pypi/v/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![Python](https://img.shields.io/pypi/pyversions/git-preflight-gate)](https://pypi.org/project/git-preflight-gate/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Repository:** [`git-preflight-gate`](https://github.com/alexisromtz-lab/git-preflight-gate) · **Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
 
-**Un gate de integridad para agentes de IA autónomos: que un bot no ensucie el árbol
-ni cometa colisiones de concurrencia.**
+**An integrity gate for autonomous AI agents: so that a bot does not dirty the tree
+and does not commit concurrency collisions either.**
 
-Antes de que un agente escriba una línea, el gate exige una tupla de destino —
-`TARGET` (absoluto) · `BLOB_PRE` · `HUELLA` · `LINEAS_PRE` — y devuelve un código que
-**autoriza o bloquea** la escritura. Sin corrida previa con `RC 0`, no se escribe.
+## What ships as the product, and what sits on the bench
+
+| tier | artefact | status | measured on 2026-11-06 |
+|---|---|---|---|
+| **product** | `preflight-gate.sh` — 145 lines of bash, zero dependencies | stable | case bank **9/9**, each code with its cause |
+| bench | `sim/gate_workflows_ci.py` + the root `action.yml` | **experimental** | fires on **9/9** maintained public repos ⇒ does not discriminate yet |
+
+Everything from [`Part 2`](#part-2--advanced-topological-analysis-experimental) down is
+that second instrument. It is published because its falsifiers are published, not because
+it is ready to gate a merge — its own measured base rate is in that section, and reading it
+is the point.
+
+Download the product:
 
 ```bash
-bash preflight-gate.sh /ruta/absoluta/archivo.py <blob_pre> <huella_exclusiva> <lineas_pre>
+curl -fsSL https://raw.githubusercontent.com/alexisromtz-lab/git-preflight-gate/main/preflight-gate.sh \
+  -o preflight-gate.sh
 ```
 
-## Los códigos (fail-closed)
+No install step, no `pip`, no action, no token.
 
-| RC | significado |
+Before an agent writes a line, the gate demands a destination tuple —
+`TARGET` (absolute) · `BLOB_PRE` · `HUELLA` · `LINEAS_PRE` — and returns a code that
+**authorizes or blocks** the write. Without a prior run ending in `RC 0`, nothing is written.
+
+## Install
+
+```bash
+pip install git-preflight-gate        # Python CI gate (PyYAML comes with it)
+ci-authority-gate /path/to/your/repo  # RC 0 = pass · RC > 0 = fail-closed, cause printed
+```
+
+Two doors, measured separately — do not confuse them:
+
+| door | command | what it needs |
+|---|---|---|
+| **CI authority gate** | `pip install git-preflight-gate` | Python ≥ 3.9 + PyYAML (pip resolves it) |
+| **pre-write gate (bash)** | `curl -fsSL https://raw.githubusercontent.com/alexisromtz-lab/git-preflight-gate/main/preflight-gate.sh -o preflight-gate.sh` | bash + git, **zero dependencies** |
+
+The wheel ships the Python gate (`sim/`); the bash gate ships in the source distribution and in the repository, and is deliberately dependency-free so it can run on a machine with nothing installed. Neither is a wrapper around the other.
+
+### The pre-write gate, at the shell
+
+```bash
+bash preflight-gate.sh /absolute/path/file.py <blob_pre> <exclusive_marker> <lineas_pre>
+```
+
+## The codes (fail-closed)
+
+| RC | meaning |
 |---:|---|
-| `0` | PRE-VUELO OK — el destino acepta la edición sobre `BLOB_PRE` |
-| `10` | el objeto no existe (creación) |
-| `11` | **la huella ya habita en el destino** ⇒ colisión: la fila ya está escrita |
-| `12` | blob medido ≠ contrato ⇒ el árbol se movió |
-| `13` | estado sucio en git ⇒ modificaciones no adjudicadas |
-| `14` | el destino no vive en un árbol git ⇒ el gate no puede validar identidad |
-| `15` | líneas distintas al contrato |
-| `20` | uso incorrecto (tupla incompleta, o `TARGET` no absoluto) |
+| `0` | PRE-FLIGHT OK — the target accepts an edit on `BLOB_PRE` |
+| `10` | the object does not exist (creation) |
+| `11` | **the marker already lives in the target** ⇒ collision: the row is already written |
+| `12` | measured blob ≠ contract ⇒ the tree moved |
+| `13` | dirty git state ⇒ unadjudicated modifications |
+| `14` | the target is not inside a git tree ⇒ the gate cannot verify identity |
+| `15` | line count differs from the contract |
+| `20` | misuse (incomplete tuple, or `TARGET` not absolute) |
 
-Cada código sale **con su causa impresa**. Un `RC` correcto por el motivo equivocado
-no es un gate: es una coincidencia.
+Every code comes out **with its cause printed**. A correct `RC` for the wrong reason is not a gate: it is a coincidence.
 
-## Por qué `RC 11` es el caso que importa
+## Why `RC 11` is the case that matters
 
-El defecto más caro de un agente no es equivocarse de ruta: es **volver a escribir algo
-que otra mano ya escribió**, y reportar éxito. La huella es un fragmento literal
-exclusivo del texto a insertar; si ya está en el destino, la escritura se rechaza antes
-de tocar el archivo. El gate no adivina intenciones: niega la colisión.
+The most expensive defect of an agent is not picking the wrong path: it is **writing again something another hand already wrote**, and reporting success. The marker is an exclusive literal fragment of the text to be inserted; if it is already in the target, the write is rejected before the file is touched. The gate does not guess intent: it denies the collision.
 
-## Por qué `TARGET` debe ser absoluto
+## Why `TARGET` must be absolute
 
-El gate re-basa con `git -C <directorio>` para medir el blob y el estado. Una ruta
-relativa se contaría desde **dos bases distintas** (`cwd` y el directorio del objeto) y
-podría hashear *otro* archivo que sí existe. Fail-closed: ruta relativa ⇒ `RC 20`.
+The gate rebases with `git -C <directory>` to measure the blob and the state. A relative path would be counted from **two different bases** (`cwd` and the object's directory) and could hash *another* file that does exist. Fail-closed: relative path ⇒ `RC 20`.
 
-## Por qué `RC 14` existe
+## Why `RC 14` exists
 
-Sin árbol git, `git status` devuelve 128 con salida vacía. Un gate ingenuo lee esa
-salida vacía como «limpio» y da verde. Aquí se declara la imposibilidad: sin árbol no
-hay identidad de blob que valga.
+Without a git tree, `git status` returns 128 with empty output. A naive gate reads that empty output as "clean" and goes green. Here the impossibility is declared: without a tree there is no blob identity worth anything.
 
-## Banco de casos
+## Case bank
 
 ```bash
 bash tests/must_fail.sh
 ```
 
-9 casos, **9/9**, cada uno verificando código **y** causa: `20` (tupla incompleta),
-`20` (ruta relativa), `10`, `11`, `12`, `15`, `13`, `14` y el control positivo `0`.
-Un banco sin control positivo sólo demuestra que el instrumento sabe decir que no.
+9 cases, **9/9**, each verifying the code **and** the cause: `20` (incomplete tuple), `20` (relative path), `10`, `11`, `12`, `15`, `13`, `14`, and the positive control `0`. A bank without a positive control only proves the instrument knows how to say no.
 
-## Telemetría fuera de banda
+## Out-of-band telemetry
 
-Cada corrida anota 7 campos (`hora_utc target blob_pre blob_medido rc hash_arbol_ini
-hash_arbol_fin`) en `${GATE_TELEMETRIA_LOG:-$HOME/preflight-telemetria.log}`. La
-telemetría **no puede mover el RC**, **no puede abortar** y **no puede refrescar el
-índice** (`--no-optional-locks`). La ruta nunca es relativa: un log dentro del árbol se
-vuelve un archivo no rastreado, y entonces el gate termina midiendo su propia
-telemetría — el instrumento que se cuenta a sí mismo.
+Each run records 7 fields (`hora_utc target blob_pre blob_medido rc hash_arbol_ini hash_arbol_fin`) in `${GATE_TELEMETRIA_LOG:-$HOME/preflight-telemetria.log}`. Telemetry **cannot move the RC**, **cannot abort** and **cannot refresh the index** (`--no-optional-locks`). The path is never relative: a log inside the tree becomes an untracked file, and then the gate ends up measuring its own telemetry — the instrument counting itself.
 
-## Límites declarados
+## Declared limits
 
-- Sobre un `TARGET` inexistente el gate corta en `RC 10` **antes** de comparar blob y
-  líneas: en la rama de creación, la tupla es **contrato**, no medición. Se declara; no
-  se repara (fail-closed es correcto).
-- No juzga el contenido: certifica identidad y colisión, no corrección.
+- On a nonexistent `TARGET` the gate stops at `RC 10` **before** comparing blob and lines: in the creation branch, the tuple is a **contract**, not a measurement. It is declared, not repaired (fail-closed is correct).
+- It does not judge content: it certifies identity and collision, not correctness.
+- **This build is a subset of the gate it came from.** The 145 lines published here
+  implement nine codes. The reference implementation these came from implements four more,
+  and they are the ones that defend against a *false green*: `RC 19` (the marker is present
+  but the blob is **not** the contracted one ⇒ ratification *without* identity), `RC 23`
+  (the target is git-ignored ⇒ `git status` returns empty and a naive gate reads "clean",
+  then **authorizes** a write with no history), `RC 24` (the index carries a freshness bit
+  ⇒ git refuses to compare and the same empty output is read as clean) and `RC 31` (the
+  object is empty while `LINEAS_PRE > 0`). Until this file catches up, a `RC 11`
+  ratification here means *the marker is there*, not *the object is the one you contracted*.
+  Measured on this page's own edit: post-flight against a contracted blob of `ec33b0c0`
+  on a disk holding `c63c73ce` returned `RC 11` — the reference gate returns `RC 19`
+  there. Same file, same tuple, two different verdicts: that is the gap, and it is the
+  next thing to close.
 
-## La Action de la raíz: CI Authority Gate
+---
 
-El `action.yml` de este repositorio es una **action composite** que ejecuta un segundo
-instrumento, `sim/gate_workflows_ci.py`: un verificador estructural de la topología de
-autoridad en `.github/workflows/`. Cinco invariantes contables, siete causas tipadas,
-`RC = min(causas)`, `UNIVERSO_VACIO` = causa `31` (cero archivos es fracaso, no
-aprobación).
+# Part 2 — Advanced topological analysis (experimental)
 
-Identidad medida del instrumento copiado a este árbol:
+**Nothing in this part is the product.** It is a second instrument, with its own domain,
+its own dependency (`PyYAML`) and its own unresolved defect. It is documented because a
+bench instrument that hides its base rate is indistinguishable from a scam.
 
-| propiedad | valor |
+## Measured status: it does not discriminate yet
+
+The verdict is `RC = min(causes)`, so the **lowest-numbered cause present wins**. Causes
+`1`, `2`, `4` and `5` describe the ordinary posture of a real release pipeline — a job
+with `contents: write` that runs `npm ci`, a sink that publishes without
+`download-artifact`, `${{ secrets.* }}` in an `env:` block, `uses: …@v4` instead of a
+40-character SHA. None of those is a defect: they are what shipping looks like.
+
+Sweep run on 2026-11-06 over the `.github/workflows/` of nine maintained public
+repositories — `git clone --depth 1`, one `--root` call each:
+
+| repo | workflow files | verdict | causes present |
+|---|---:|---|---|
+| `psf/requests` | 8 | RC 1 · FALLO CERRADO | 1 |
+| `astral-sh/ruff` | 25 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| `pydantic/pydantic` | 9 | RC 1 · FALLO CERRADO | 1, 2, 4 |
+| `tiangolo/fastapi` | 18 | RC 1 · FALLO CERRADO | 1, 2, 4 |
+| `pallets/flask` | 5 | RC 1 · FALLO CERRADO | 1 |
+| `numpy/numpy` | 23 | RC 2 · FALLO CERRADO | 2, 4 |
+| `vitejs/vite` | 13 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| `sharkdp/bat` | 2 | RC 4 · FALLO CERRADO | 4, 5 |
+| `jqlang/jq` | 8 | RC 1 · FALLO CERRADO | 1, 2, 4, 5 |
+| **total** | **111** | **9/9 FALLO CERRADO** | — |
+
+The base rate of the blocking verdict on maintained repositories is therefore **100 %**,
+and a gate that is red on everything is not measuring: it is refusing. Only cause `3`,
+`DISPARADOR_ENVENENADO` — `pull_request_target` / `workflow_run` plus `actions/checkout`
+of `github.event.pull_request.head` inside a context with write scopes or secrets, the
+"pwn request" shape — fired **0 of 9**. It is the only cause that describes exploitation
+by an attacker rather than posture by a maintainer.
+
+**What would make this instrument publishable** is not another cause. It is partitioning
+the verdict: cause `3` blocks, causes `1/2/4/5` become declared posture printed on every
+run, and `RC 31` stays what it is — a *read* failure, never a verdict. That partition is
+only publishable together with its positive control: the `C3_DISPARADOR_ENVENENADO` case
+in `--self-test` has to keep firing `RC 3`, or the fix would replace a red-on-everything
+instrument with a green-on-everything one, which is the more dangerous of the two. Until
+both exist, this is on the bench.
+
+## The root Action: CI Authority Gate
+
+**Marketplace:** [Install the action](https://github.com/marketplace/actions/ci-authority-gate)
+— the listing keeps the name it was registered under.
+
+The `action.yml` at this repository's root is a **composite action** running a second instrument, `sim/gate_workflows_ci.py`: a structural verifier of the authority topology in `.github/workflows/`. Five counting invariants, seven typed causes, `RC = min(causes)`, `UNIVERSO_VACIO` = cause `31` (zero files is failure, not approval).
+
+Measured identity of the instrument copied into this tree:
+
+| property | value |
 |---|---|
-| líneas / bytes | 615 / 21470 |
+| lines / bytes | 615 / 21470 |
 | git blob | `ff9c69a944e7965b3fda0901f7745d80a9e85c7c` |
 | sha256-16 | `073954a84f3c84fd` |
 
-Uso como consumidor:
+Using it as a consumer:
 
 ```yaml
-- uses: alexisromtz-lab/git-preflight-gate@v0.1.3
+- uses: alexisromtz-lab/git-preflight-gate@v0.1.4
   with:
     workflows-dir: .github/workflows
     fail-on-red: "true"
 ```
 
 <!-- HUELLA-RELEASE-V013-20261031 -->
-`v0.1.3`, `v0.1.2` y `v0.1.1` ejecutan el mismo `action.yml` (`9ef420ec`) y el mismo
-`sim/gate_workflows_ci.py` (`ff9c69a9`): el código del gate no cambió entre los tres.
-Lo que cambia es el envoltorio de adopción —`v0.1.2` añadió `templates/platino-gate.yml`
-y `v0.1.3` añadió `action-selftest.yml`, la alineación del manifiesto y esta
-documentación—. Si fijas por SHA, usa el commit —no el tag—.
+`v0.1.3`, `v0.1.2` and `v0.1.1` run the same `action.yml` (`9ef420ec`) and the same `sim/gate_workflows_ci.py` (`ff9c69a9`): the gate's code did not change across the three. What changes is the adoption wrapper — `v0.1.2` added `templates/platino-gate.yml` and `v0.1.3` added `action-selftest.yml`, the manifest alignment and this documentation. If you pin by SHA, use the commit — not the tag.
 
-Los cuatro inputs (`workflows-dir`, `root`, `python-bin`, `fail-on-red`) y los dos
-outputs (`rc`, `veredicto`) conservan el contrato del `action.yml` que este repositorio
-**reemplaza**: cualquier CI que apuntaba a la action de la raíz de un repositorio de
-trabajo migra cambiando sólo el nombre del repositorio en `uses:`; el resto del bloque
-`with:` no cambia.
+The four inputs (`workflows-dir`, `root`, `python-bin`, `fail-on-red`) and the two
+outputs (`rc`, `veredicto`) preserve the contract of the `action.yml` that this
+repository **replaces**: any CI that pointed at the root action of a working repository
+migrates by changing only the repository name in `uses:`; the rest of the `with:` block
+does not change.
 
-La acción no adivina el dominio: el instrumento resuelve un único punto,
-`<raiz>/.github/workflows`. Por eso `workflows-dir` se enruta a `--file` cuando el path
-existe y a `--root` cuando no. Un `--root` que aceptara cualquier directorio con YAMLs
-sería editar el metro para que quepa la demo.
+The action does not guess the domain: the instrument resolves a single point, `<root>/.github/workflows`. That is why `workflows-dir` routes to `--file` when the path exists and to `--root` when it does not. A `--root` that accepted any directory with YAML files would be editing the ruler so the demo fits.
 
-Dependencia única: `PyYAML==6.0.3`, declarada como extra opcional
-(`pip install ".[ci-authority-gate]"`). El resto es stdlib. El instrumento no lee red,
-no escribe archivos, no usa aleatoriedad y no consulta el reloj.
+<!-- HUELLA-README-D5-20261106 -->
+The one exception is a **normalisation of the same single point, not a second one**. Both
+forms below measure `<repo>/.github/workflows`; the second one used to fail with
+`RC 31 UNIVERSO_VACIO` and blame the audited tree for an argv mistake (measured
+2026-11-06 on `pallets/flask`):
 
-Control positivo medido: workflow con `permissions: contents: read` y `uses` fijado por
-SHA completo ⇒ `CAUSAS PRESENTES: ninguna`, `VEREDICTO: PASA`, `RC=0`. Control negativo:
-`pull_request_target` + `permissions: write-all` + `curl | bash` + `actions/checkout@v4`
-⇒ `CAUSAS PRESENTES: [1, 2, 5]`, `RC=1`. Universo vacío ⇒ `CAUSAS PRESENTES: [31]`,
-`RC=31`.
+```bash
+ci-authority-gate /path/to/repo                          # resolves <repo>/.github/workflows
+ci-authority-gate /path/to/repo/.github/workflows        # already resolved: measured in place,
+                                                         # prints AVISO D5_RAIZ_YA_ES_WORKFLOWS
+```
 
-## Los dos instrumentos no se confunden
+`D5_RAIZ_YA_ES_WORKFLOWS` is a declared warning, not a return code: it never changes the
+verdict and it does not widen the domain. Any other directory called `workflows` — or a
+near miss like `.github/workflowz` — still resolves to `<arg>/.github/workflows`; that is
+what cases `R4_CONTROL_BASENAME` and `R5_CONTROL_PARECIDO` in
+[`tests/banco_raiz_workflows.sh`](tests/banco_raiz_workflows.sh) hold in place.
 
-| instrumento | pregunta | forma |
+Single dependency: `PyYAML==6.0.3`, declared as an optional extra (`pip install ".[ci-authority-gate]"`). The rest is stdlib. The instrument does not read the network, does not write files, does not use randomness and does not consult the clock.
+
+Installable without cloning the repository, from the release wheel. The
+`ci-authority-gate` extra is mandatory for the CLI: without PyYAML the instrument does
+not measure and exits `RC=30` (fail-closed), not green.
+
+```bash
+pip install "git-preflight-gate[ci-authority-gate] @ https://github.com/alexisromtz-lab/git-preflight-gate/releases/download/v0.1.4/git_preflight_gate-0.1.4-py3-none-any.whl"
+ci-authority-gate --self-test   # built-in must-fail bank; touches no disk
+ci-authority-gate --root .      # measures <root>/.github/workflows and returns its RC
+```
+
+<!-- HUELLA-README-V014-20261106 -->
+`v0.1.4` does not change the gate: `action.yml` (`9ef420ec`) and
+`sim/gate_workflows_ci.py` (`ff9c69a9`) are the same blobs as in `v0.1.3`. What changes
+is the package: `MANIFEST.in` makes the sdist carry the product, and the manifest
+declares the `sim` package and the `ci-authority-gate` script. Before this change the
+wheel was 6 768 B of `dist-info` only and no CLI existed. It is not on PyPI yet: the
+only `pip` path today is the release URL.
+
+Measured positive control: workflow with `permissions: contents: read` and `uses` pinned by full SHA ⇒ `CAUSAS PRESENTES: ninguna`, `VEREDICTO: PASA`, `RC=0`. Negative control: `pull_request_target` + `permissions: write-all` + `curl | bash` + `actions/checkout@v4` ⇒ `CAUSAS PRESENTES: [1, 2, 5]`, `RC=1`. Empty universe ⇒ `CAUSAS PRESENTES: [31]`, `RC=31`.
+
+## The two instruments are not to be confused
+
+| instrument | question | form |
 |---|---|---|
-| `preflight-gate.sh` | ¿este agente puede escribir *este archivo* ahora? | CLI bash, tupla de destino |
-| `sim/gate_workflows_ci.py` | ¿esta topología de CI concentra autoridad sin control? | action composite + CLI Python |
+| `preflight-gate.sh` | may this agent write *this file* now? | bash CLI, target tuple |
+| `sim/gate_workflows_ci.py` | does this CI topology concentrate authority without control? | composite action + Python CLI |
 
-El primero protege una escritura; el segundo audita un árbol de workflows. Comparten la
-doctrina (fail-closed, causa impresa, cero archivos = imposibilidad declarada), no el
-código.
+The first protects a write; the second audits a workflow tree. They share the doctrine (fail-closed, printed cause, zero files = declared impossibility), not the code.
 
-## Instalarlo en tu repositorio en 1 minuto
+## Install the Action in your repository in 1 minute
+
+> **This installs the experimental instrument, not the product.** The template below runs
+> `action.yml`, which runs `sim/gate_workflows_ci.py`. Read
+> [Measured status](#measured-status-it-does-not-discriminate-yet) first: on a maintained
+> repository this workflow goes red today for reasons that are not defects.
 
 <!-- HUELLA-BADGE-PLATINO-README-20261031 -->
 
@@ -151,29 +265,22 @@ git commit -m "ci: platino preflight gate"
 git push
 ```
 
-Eso es todo: el workflow se dispara en el siguiente `push` o PR.
+That is all: the workflow fires on the next `push` or PR.
 
-### El archivo debe llamarse `platino-gate.yml` (esto es un contrato, no un consejo)
+### The file must be named `platino-gate.yml` (this is a contract, not advice)
 
-Si lo renombras —`ci.yml`, `gate.yml`, `platino-gate.yaml`— el primer job falla
-cerrado con `RC 20` y te dice por qué. La razón es medida, no estética: el badge
-de estado se resuelve **por nombre de archivo** (`.../workflow/status/TU-REPO/TU-REPO/platino-gate.yml`).
-Con otro nombre, el badge leería *tu* workflow de CI, no este gate, y publicaría un
-verde que no mide nada. El contrato está dentro del workflow, no en esta página.
+If you rename it — `ci.yml`, `gate.yml`, `platino-gate.yaml` — the first job fails closed with `RC 20` and tells you why. The reason is measured, not aesthetic: the status badge resolves **by file name** (`.../workflow/status/YOUR-REPO/YOUR-REPO/platino-gate.yml`). With another name, the badge would read *your* CI workflow, not this gate, and would publish a green that measures nothing. The contract lives inside the workflow, not on this page.
 
-Falsado por `tests/test_platino_gate_template.py`: 5 casos de nombre y 5
-estructurales, `RC 0` solo si los 10 concuerdan; un template mutado para aceptar
-cualquier `.yml` devuelve `RC 1` nombrando la fila culpable.
+Falsified by `tests/test_platino_gate_template.py`: 5 name cases and 5 structural cases, `RC 0` only if all 10 agree; a template mutated to accept any `.yml` returns `RC 1` naming the offending row.
 
-## El badge
+## The badge
 
-Al terminar el run, la pestaña **Summary** publica el badge ya rellenado con tu
-`owner/repo`. Hay dos, y no son lo mismo:
+When the run finishes, the **Summary** tab publishes the badge already filled in with your `owner/repo`. There are two, and they are not the same:
 
-| badge | qué afirma | permisos que pide |
+| badge | what it claims | permissions it asks for |
 |---|---|---|
-| de **estado** (dinámico) | el resultado real del run más reciente de `platino-gate.yml` | `contents: read` |
-| **sello** (estático) | «este repositorio pasó el gate» | `contents: read` |
+| **status** (dynamic) | the real result of the most recent run of `platino-gate.yml` | `contents: read` |
+| **seal** (static) | "this repository passed the gate" | `contents: read` |
 
 ```markdown
 [![Platino Preflight Gate](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/platino-gate.yml?label=preflight%20gate&branch=main)](https://github.com/alexisromtz-lab/la-auditora)
@@ -181,39 +288,27 @@ Al terminar el run, la pestaña **Summary** publica el badge ya rellenado con tu
 [![Audited by Platino Labs](https://img.shields.io/badge/audited_by-Platino_Labs-6f42c1)](https://github.com/alexisromtz-lab/la-auditora)
 ```
 
-El de estado no puede mentir: lo dibuja GitHub desde el run. **El sello, sí**: es un
-literal que cualquiera puede pegar en verde sin haber corrido nada. Ponlo solo cuando
-el run esté en verde — el gate no lo puede verificar por ti.
+The status one cannot lie: GitHub draws it from the run. **The seal can**: it is a literal anyone can paste in green without having run anything. Use it only when the run is green — the gate cannot verify that for you.
 
-**Cero permisos de escritura, en los dos casos.** El workflow no toca tu README, no
-pide `contents: write` y no necesita ningún servicio nuestro: el badge es una URL de
-`shields.io` que lee el estado público de tu propio workflow. No hay endpoint que
-hospedar, ni token que caducar.
+**Zero write permissions, in both cases.** The workflow does not touch your README, does not ask for `contents: write` and needs no service of ours: the badge is a `shields.io` URL that reads the public status of your own workflow. There is no endpoint to host, no token to expire.
 
-### Qué mide y qué no
+### What it measures and what it does not
 
-| mide | no mide |
+| measures | does not measure |
 |---|---|
-| topología de autoridad en `.github/workflows/`: `permissions`, disparadores, `uses` por SHA, sumideros de ejecución | si tu código hace lo que dice |
-| siete causas tipadas, `RC = min(causas)`, `UNIVERSO_VACIO` = causa `31` | los permisos por defecto del `GITHUB_TOKEN` a nivel de organización |
-| el árbol que tienes, en el commit que corre | confianza OIDC / Trusted Publishing en el registro destino |
+| authority topology in `.github/workflows/`: `permissions`, triggers, `uses` pinned by SHA, execution sinks | whether your code does what it says |
+| seven typed causes, `RC = min(causes)`, `UNIVERSO_VACIO` = cause `31` | default `GITHUB_TOKEN` permissions at organization level |
+| the tree you have, at the commit that runs | OIDC / Trusted Publishing trust in the destination registry |
 
-El segundo bloque está impreso en cada run, bajo `RESIDUO DECLARADO`. Un gate que no
-declara sus límites no es un gate: es una promesa.
+The second block is printed on every run, under `RESIDUO DECLARADO`. A gate that does not declare its limits is not a gate: it is a promise.
 
-### Cómo se prueba el propio envoltorio
+### How the wrapper tests itself
 
 <!-- HUELLA-BADGE-SELFTEST-DOC-20261031 -->
-El `action.yml` no se prueba leyendo su YAML: se ejecuta. En cada push a `main`, el
-workflow [`action-selftest.yml`](.github/workflows/action-selftest.yml) corre la acción
-dos veces con `uses: ./` —sobre este mismo repositorio, donde exige `rc=0` / `PASA`, y
-sobre una fixture envenenada en `tests/fixtures/sumidero`, donde exige `rc=2` /
-`SUMIDERO_IMPUDO`—. Si la instalación del extra (`pip install "<action_dir>[ci-authority-gate]"`)
-o el enrutado de inputs se rompen, enrojece aquí antes de enrojecer en tu runner.
+`action.yml` is not tested by reading its YAML: it is executed. On every push to `main`, the workflow [`action-selftest.yml`](.github/workflows/action-selftest.yml) runs the action twice with `uses: ./` — once on this repository itself, where it demands `rc=0` / `PASA`, and once on a poisoned fixture in `tests/fixtures/sumidero`, where it demands `rc=2` / `SUMIDERO_IMPUDO`. A third job, `resolucion-del-universo`, runs the two banks that cover how the root argument is resolved: `tests/banco_raiz_workflows.sh` (7 cases, 2 negative controls) and `--self-test`. If the extra's installation (`pip install "<action_dir>[ci-authority-gate]"`), the input routing or the root resolution breaks, it goes red here before going red on your runner.
 
-Un self-test que sólo sabe estar verde no discrimina nada: por eso el segundo caso exige
-que la acción **falle** con la causa correcta.
+A self-test that only knows how to be green discriminates nothing: that is why the second case demands the action **fail** with the correct cause.
 
-## Licencia
+## License
 
-MIT. Ver `LICENSE`.
+MIT. See `LICENSE`.
